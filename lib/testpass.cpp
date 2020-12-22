@@ -14,13 +14,15 @@
 
 using namespace llvm;
 
+#define DEBUG 0
 
 namespace {
   
+  //A structure to hold all access info
   struct AccessInfo{
    
     int IterationDistance;
-    int Levels;
+    int Levels; //loop levels
   
   };
   
@@ -34,6 +36,7 @@ namespace {
         AU.addRequired<DependenceAnalysisWrapperPass>();
     }
 
+   // Used to get the array the instruction is accessing    
     Value* getArrayAccess(const SCEV *ptr){
         
         Value *arrName=NULL;
@@ -52,21 +55,31 @@ namespace {
         return arrName;
     }
 
+    // Gets the iteration distance
     int getDistance(const SCEVAddRecExpr* ptr){
         if(auto dist=cast<SCEVConstant>(ptr->getOperand(0)))
             return dist->getValue()->getSExtValue();
     }
 
+    // Main function to check dependency between instructions in a loop
     void checkDependency(std::vector<Instruction*>Ins,DependenceInfo *DI,ScalarEvolution *SE){
         for(auto I=Ins.begin();I!=Ins.end();I++){
+          
+          //Checking if the pair of instructions are accessing memory or not 
+
           if((*I)->mayReadOrWriteMemory() &&  isa<GetElementPtrInst>(getLoadStorePointerOperand(*I))){ 
              for(auto J=I;J!=Ins.end();J++){
                    if((*J)==(*I))
                        continue;
                    if((*J)->mayReadOrWriteMemory() && isa<GetElementPtrInst>(getLoadStorePointerOperand(*J))){
+                        
+                        #if DEBUG
                         // (*I)->dump();
                         // (*J)->dump();
-
+                        #endif 
+                         
+                          // Getting array Accesses 
+                          
                           GetElementPtrInst *arr_access1= cast<GetElementPtrInst>(getLoadStorePointerOperand(*I));  
                           GetElementPtrInst *arr_access2= cast<GetElementPtrInst>(getLoadStorePointerOperand(*J));
 
@@ -75,9 +88,10 @@ namespace {
                           
                           //Same array access 
                           if(A1==A2){
-                            
+                            #if DEBUG
                             // A1->dump();
                             // A2->dump();
+                            #endif
                                AccessInfo acc1,acc2;
 
                                   for (auto gep_op= arr_access1->idx_begin();gep_op!=arr_access1->idx_end();gep_op++){
@@ -91,7 +105,6 @@ namespace {
                               
                                   for (auto gep_op= arr_access2->idx_begin();gep_op!=arr_access2->idx_end();gep_op++){
 
-                                    //(*gep_op)->dump();
                                     const SCEV *index=SE->getSCEV(*gep_op);
                                     if(auto test=dyn_cast<SCEVAddRecExpr>(index)){
                                         acc2.IterationDistance=getDistance(test);
@@ -102,9 +115,10 @@ namespace {
                                   //same loop nest  
                                   if(acc1.Levels==acc2.Levels){
                                      if(isa<StoreInst>(*I) && isa<LoadInst>(*J)){ 
+                                          #if DEBUG
                                           // llvm::dbgs()<<"Write Distance "<<acc1.IterationDistance<<"\n"; 
                                           // llvm::dbgs()<<"Read Distance "<<acc2.IterationDistance<<"\n";
-
+                                          #endif 
                                           if((*I)->hasMetadata() && (*J)->hasMetadata()){
                                              
                                               auto DbgInfo1=(*I)->getDebugLoc();
@@ -130,9 +144,10 @@ namespace {
                                          }
                                      }
                                      else if(isa<StoreInst>(*J) && isa<LoadInst>(*I)){
+                                          #if DEBUG
                                           // llvm::dbgs()<<"Write Distance "<<acc2.IterationDistance<<"\n"; 
                                           // llvm::dbgs()<<"Read Distance "<<acc1.IterationDistance<<"\n";
-
+                                          #endif
                                           if((*I)->hasMetadata() && (*J)->hasMetadata()){
                                              
                                               auto DbgInfo1=(*I)->getDebugLoc();
@@ -164,6 +179,7 @@ namespace {
         }
     }
 
+   //Runs as a function pass
     bool runOnFunction(Function &F) override {
 
       auto *LI=&getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
